@@ -1,0 +1,355 @@
+Patches for the following CVE IDs:
+
+CVE-2018-25009
+CVE-2018-25010
+CVE-2018-25011
+CVE-2020-36328
+CVE-2018-25013
+CVE-2018-25014
+CVE-2020-36329
+CVE-2020-36330
+CVE-2020-36331
+CVE-2020-36332
+
+Comprised of the following upstream commits:
+1344a2e947c749d231141a295327e5b99b444d63
+2c70ad76c94db5427d37ab4b85dc89b94dd75e01
+39cb9aad85ca7bb1d193013460db1f8cc6bff109
+569001f19fc81fcb5ab358f587a54c62e7c4665c
+907208f97ead639bd521cf355a2f203f462eade6
+95fd65070662e01cc9170c4444f5c0859a710097
+be738c6d396fa5a272c1b209be4379a7532debfe
+dad31750e374eff8e02fb467eb562d4bf236ed6e
+dce5d7643177633ebe3513af492ea8c08c299cf3
+eb82ce76ddca13ad6fb13376bb58b9fd3f850e9e
+
+--- libwebp-0.6.1.orig/src/dec/buffer_dec.c
++++ libwebp-0.6.1/src/dec/buffer_dec.c
+@@ -74,7 +74,8 @@ static VP8StatusCode CheckDecBuffer(cons
+   } else {    // RGB checks
+     const WebPRGBABuffer* const buf = &buffer->u.RGBA;
+     const int stride = abs(buf->stride);
+-    const uint64_t size = MIN_BUFFER_SIZE(width, height, stride);
++    const uint64_t size =
++        MIN_BUFFER_SIZE(width * kModeBpp[mode], height, stride);
+     ok &= (size <= buf->size);
+     ok &= (stride >= width * kModeBpp[mode]);
+     ok &= (buf->rgba != NULL);
+--- libwebp-0.6.1.orig/src/dec/idec_dec.c
++++ libwebp-0.6.1/src/dec/idec_dec.c
+@@ -283,10 +283,8 @@ static void RestoreContext(const MBConte
+ 
+ static VP8StatusCode IDecError(WebPIDecoder* const idec, VP8StatusCode error) {
+   if (idec->state_ == STATE_VP8_DATA) {
+-    VP8Io* const io = &idec->io_;
+-    if (io->teardown != NULL) {
+-      io->teardown(io);
+-    }
++    // Synchronize the thread, clean-up and check for errors.
++    VP8ExitCritical((VP8Decoder*)idec->dec_, &idec->io_);
+   }
+   idec->state_ = STATE_ERROR;
+   return error;
+@@ -473,6 +471,12 @@ static VP8StatusCode DecodeRemaining(Web
+             MemDataSize(&idec->mem_) > MAX_MB_SIZE) {
+           return IDecError(idec, VP8_STATUS_BITSTREAM_ERROR);
+         }
++        // Synchronize the threads.
++        if (dec->mt_method_ > 0) {
++          if (!WebPGetWorkerInterface()->Sync(&dec->worker_)) {
++            return IDecError(idec, VP8_STATUS_BITSTREAM_ERROR);
++          }
++        }
+         RestoreContext(&context, dec, token_br);
+         return VP8_STATUS_SUSPENDED;
+       }
+--- libwebp-0.6.1.orig/src/dec/vp8l_dec.c
++++ libwebp-0.6.1/src/dec/vp8l_dec.c
+@@ -362,12 +362,19 @@ static int ReadHuffmanCodes(VP8LDecoder*
+   VP8LMetadata* const hdr = &dec->hdr_;
+   uint32_t* huffman_image = NULL;
+   HTreeGroup* htree_groups = NULL;
++  // When reading htrees, some might be unused, as the format allows it.
++  // We will still read them but put them in this htree_group_bogus.
++  HTreeGroup htree_group_bogus;
+   HuffmanCode* huffman_tables = NULL;
++  HuffmanCode* huffman_tables_bogus = NULL;
+   HuffmanCode* next = NULL;
+   int num_htree_groups = 1;
++  int num_htree_groups_max = 1;
+   int max_alphabet_size = 0;
+   int* code_lengths = NULL;
+   const int table_size = kTableSize[color_cache_bits];
++  int* mapping = NULL;
++  int ok = 0;
+ 
+   if (allow_recursion && VP8LReadBits(br, 1)) {
+     // use meta Huffman codes.
+@@ -384,10 +391,42 @@ static int ReadHuffmanCodes(VP8LDecoder*
+       // The huffman data is stored in red and green bytes.
+       const int group = (huffman_image[i] >> 8) & 0xffff;
+       huffman_image[i] = group;
+-      if (group >= num_htree_groups) {
+-        num_htree_groups = group + 1;
++      if (group >= num_htree_groups_max) {
++        num_htree_groups_max = group + 1;
+       }
+     }
++    // Check the validity of num_htree_groups_max. If it seems too big, use a
++    // smaller value for later. This will prevent big memory allocations to end
++    // up with a bad bitstream anyway.
++    // The value of 1000 is totally arbitrary. We know that num_htree_groups_max
++    // is smaller than (1 << 16) and should be smaller than the number of pixels
++    // (though the format allows it to be bigger).
++    if (num_htree_groups_max > 1000 || num_htree_groups_max > xsize * ysize) {
++      // Create a mapping from the used indices to the minimal set of used
++      // values [0, num_htree_groups)
++      mapping = (int*)WebPSafeMalloc(num_htree_groups_max, sizeof(*mapping));
++      if (mapping == NULL) {
++        dec->status_ = VP8_STATUS_OUT_OF_MEMORY;
++        goto Error;
++      }
++      // -1 means a value is unmapped, and therefore unused in the Huffman
++      // image.
++      memset(mapping, 0xff, num_htree_groups_max * sizeof(*mapping));
++      for (num_htree_groups = 0, i = 0; i < huffman_pixs; ++i) {
++        // Get the current mapping for the group and remap the Huffman image.
++        int* const mapped_group = &mapping[huffman_image[i]];
++        if (*mapped_group == -1) *mapped_group = num_htree_groups++;
++        huffman_image[i] = *mapped_group;
++      }
++      huffman_tables_bogus = (HuffmanCode*)WebPSafeMalloc(
++          table_size, sizeof(*huffman_tables_bogus));
++      if (huffman_tables_bogus == NULL) {
++        dec->status_ = VP8_STATUS_OUT_OF_MEMORY;
++        goto Error;
++      }
++    } else {
++      num_htree_groups = num_htree_groups_max;
++    }
+   }
+ 
+   if (br->eos_) goto Error;
+@@ -403,11 +442,11 @@ static int ReadHuffmanCodes(VP8LDecoder*
+     }
+   }
+ 
++  code_lengths = (int*)WebPSafeCalloc((uint64_t)max_alphabet_size,
++                                      sizeof(*code_lengths));
+   huffman_tables = (HuffmanCode*)WebPSafeMalloc(num_htree_groups * table_size,
+                                                 sizeof(*huffman_tables));
+   htree_groups = VP8LHtreeGroupsNew(num_htree_groups);
+-  code_lengths = (int*)WebPSafeCalloc((uint64_t)max_alphabet_size,
+-                                      sizeof(*code_lengths));
+ 
+   if (htree_groups == NULL || code_lengths == NULL || huffman_tables == NULL) {
+     dec->status_ = VP8_STATUS_OUT_OF_MEMORY;
+@@ -415,28 +454,35 @@ static int ReadHuffmanCodes(VP8LDecoder*
+   }
+ 
+   next = huffman_tables;
+-  for (i = 0; i < num_htree_groups; ++i) {
+-    HTreeGroup* const htree_group = &htree_groups[i];
++  for (i = 0; i < num_htree_groups_max; ++i) {
++    // If the index "i" is unused in the Huffman image, read the coefficients
++    // but store them to a bogus htree_group.
++    const int is_bogus = (mapping != NULL && mapping[i] == -1);
++    HTreeGroup* const htree_group =
++        is_bogus ? &htree_group_bogus :
++        &htree_groups[(mapping == NULL) ? i : mapping[i]];
+     HuffmanCode** const htrees = htree_group->htrees;
++    HuffmanCode* huffman_tables_i = is_bogus ? huffman_tables_bogus : next;
+     int size;
+     int total_size = 0;
+     int is_trivial_literal = 1;
+     int max_bits = 0;
+     for (j = 0; j < HUFFMAN_CODES_PER_META_CODE; ++j) {
+       int alphabet_size = kAlphabetSize[j];
+-      htrees[j] = next;
++      htrees[j] = huffman_tables_i;
+       if (j == 0 && color_cache_bits > 0) {
+         alphabet_size += 1 << color_cache_bits;
+       }
+-      size = ReadHuffmanCode(alphabet_size, dec, code_lengths, next);
++      size =
++          ReadHuffmanCode(alphabet_size, dec, code_lengths, huffman_tables_i);
+       if (size == 0) {
+         goto Error;
+       }
+       if (is_trivial_literal && kLiteralMap[j] == 1) {
+-        is_trivial_literal = (next->bits == 0);
++        is_trivial_literal = (huffman_tables_i->bits == 0);
+       }
+-      total_size += next->bits;
+-      next += size;
++      total_size += huffman_tables_i->bits;
++      huffman_tables_i += size;
+       if (j <= ALPHA) {
+         int local_max_bits = code_lengths[0];
+         int k;
+@@ -448,38 +494,41 @@ static int ReadHuffmanCodes(VP8LDecoder*
+         max_bits += local_max_bits;
+       }
+     }
++    if (!is_bogus) next = huffman_tables_i;
+     htree_group->is_trivial_literal = is_trivial_literal;
+     htree_group->is_trivial_code = 0;
+     if (is_trivial_literal) {
+       const int red = htrees[RED][0].value;
+       const int blue = htrees[BLUE][0].value;
+       const int alpha = htrees[ALPHA][0].value;
+-      htree_group->literal_arb =
+-          ((uint32_t)alpha << 24) | (red << 16) | blue;
++      htree_group->literal_arb = ((uint32_t)alpha << 24) | (red << 16) | blue;
+       if (total_size == 0 && htrees[GREEN][0].value < NUM_LITERAL_CODES) {
+         htree_group->is_trivial_code = 1;
+         htree_group->literal_arb |= htrees[GREEN][0].value << 8;
+       }
+     }
+-    htree_group->use_packed_table = !htree_group->is_trivial_code &&
+-                                    (max_bits < HUFFMAN_PACKED_BITS);
++    htree_group->use_packed_table =
++        !htree_group->is_trivial_code && (max_bits < HUFFMAN_PACKED_BITS);
+     if (htree_group->use_packed_table) BuildPackedTable(htree_group);
+   }
+-  WebPSafeFree(code_lengths);
++  ok = 1;
+ 
+-  // All OK. Finalize pointers and return.
++  // All OK. Finalize pointers.
+   hdr->huffman_image_ = huffman_image;
+   hdr->num_htree_groups_ = num_htree_groups;
+   hdr->htree_groups_ = htree_groups;
+   hdr->huffman_tables_ = huffman_tables;
+-  return 1;
+ 
+  Error:
+   WebPSafeFree(code_lengths);
+-  WebPSafeFree(huffman_image);
+-  WebPSafeFree(huffman_tables);
+-  VP8LHtreeGroupsFree(htree_groups);
+-  return 0;
++  WebPSafeFree(huffman_tables_bogus);
++  WebPSafeFree(mapping);
++  if (!ok) {
++    WebPSafeFree(huffman_image);
++    WebPSafeFree(huffman_tables);
++    VP8LHtreeGroupsFree(htree_groups);
++  }
++  return ok;
+ }
+ 
+ //------------------------------------------------------------------------------
+--- libwebp-0.6.1.orig/src/mux/muxi.h
++++ libwebp-0.6.1/src/mux/muxi.h
+@@ -14,6 +14,7 @@
+ #ifndef WEBP_MUX_MUXI_H_
+ #define WEBP_MUX_MUXI_H_
+ 
++#include <assert.h>
+ #include <stdlib.h>
+ #include "src/dec/vp8i_dec.h"
+ #include "src/dec/vp8li_dec.h"
+@@ -143,13 +144,13 @@ void ChunkListDelete(WebPChunk** const c
+ 
+ // Returns size of the chunk including chunk header and padding byte (if any).
+ static WEBP_INLINE size_t SizeWithPadding(size_t chunk_size) {
++  assert(chunk_size <= MAX_CHUNK_PAYLOAD);
+   return CHUNK_HEADER_SIZE + ((chunk_size + 1) & ~1U);
+ }
+ 
+ // Size of a chunk including header and padding.
+ static WEBP_INLINE size_t ChunkDiskSize(const WebPChunk* chunk) {
+   const size_t data_size = chunk->data_.size;
+-  assert(data_size < MAX_CHUNK_PAYLOAD);
+   return SizeWithPadding(data_size);
+ }
+ 
+--- libwebp-0.6.1.orig/src/mux/muxread.c
++++ libwebp-0.6.1/src/mux/muxread.c
+@@ -59,6 +59,7 @@ static WebPMuxError ChunkVerifyAndAssign
+   // Sanity checks.
+   if (data_size < CHUNK_HEADER_SIZE) return WEBP_MUX_NOT_ENOUGH_DATA;
+   chunk_size = GetLE32(data + TAG_SIZE);
++  if (chunk_size > MAX_CHUNK_PAYLOAD) return WEBP_MUX_BAD_DATA;
+ 
+   {
+     const size_t chunk_disk_size = SizeWithPadding(chunk_size);
+@@ -137,6 +138,7 @@ static int MuxImageParse(const WebPChunk
+         wpi->is_partial_ = 1;  // Waiting for a VP8 chunk.
+         break;
+       case WEBP_CHUNK_IMAGE:
++        if (wpi->img_ != NULL) goto Fail;  // Only 1 image chunk allowed.
+         if (ChunkSetNth(&subchunk, &wpi->img_, 1) != WEBP_MUX_OK) goto Fail;
+         if (!MuxImageFinalize(wpi)) goto Fail;
+         wpi->is_partial_ = 0;  // wpi is completely filled.
+@@ -187,7 +189,7 @@ WebPMux* WebPMuxCreateInternal(const Web
+   size = bitstream->size;
+ 
+   if (data == NULL) return NULL;
+-  if (size < RIFF_HEADER_SIZE) return NULL;
++  if (size < RIFF_HEADER_SIZE + CHUNK_HEADER_SIZE) return NULL;
+   if (GetLE32(data + 0) != MKFOURCC('R', 'I', 'F', 'F') ||
+       GetLE32(data + CHUNK_HEADER_SIZE) != MKFOURCC('W', 'E', 'B', 'P')) {
+     return NULL;
+@@ -196,8 +198,6 @@ WebPMux* WebPMuxCreateInternal(const Web
+   mux = WebPMuxNew();
+   if (mux == NULL) return NULL;
+ 
+-  if (size < RIFF_HEADER_SIZE + TAG_SIZE) goto Err;
+-
+   tag = GetLE32(data + RIFF_HEADER_SIZE);
+   if (tag != kChunks[IDX_VP8].tag &&
+       tag != kChunks[IDX_VP8L].tag &&
+@@ -205,13 +205,17 @@ WebPMux* WebPMuxCreateInternal(const Web
+     goto Err;  // First chunk should be VP8, VP8L or VP8X.
+   }
+ 
+-  riff_size = SizeWithPadding(GetLE32(data + TAG_SIZE));
+-  if (riff_size > MAX_CHUNK_PAYLOAD || riff_size > size) {
+-    goto Err;
+-  } else {
+-    if (riff_size < size) {  // Redundant data after last chunk.
+-      size = riff_size;  // To make sure we don't read any data beyond mux_size.
+-    }
++  riff_size = GetLE32(data + TAG_SIZE);
++  if (riff_size > MAX_CHUNK_PAYLOAD) goto Err;
++
++  // Note this padding is historical and differs from demux.c which does not
++  // pad the file size.
++  riff_size = SizeWithPadding(riff_size);
++  if (riff_size < CHUNK_HEADER_SIZE) goto Err;
++  if (riff_size > size) goto Err;
++  // There's no point in reading past the end of the RIFF chunk.
++  if (size > riff_size + CHUNK_HEADER_SIZE) {
++    size = riff_size + CHUNK_HEADER_SIZE;
+   }
+ 
+   end = data + size;
+@@ -260,6 +264,7 @@ WebPMux* WebPMuxCreateInternal(const Web
+         chunk_list = MuxGetChunkListFromId(mux, id);  // List to add this chunk.
+         if (ChunkSetNth(&chunk, chunk_list, 0) != WEBP_MUX_OK) goto Err;
+         if (id == WEBP_CHUNK_VP8X) {  // grab global specs
++          if (data_size < CHUNK_HEADER_SIZE + VP8X_CHUNK_SIZE) goto Err;
+           mux->canvas_width_ = GetLE24(data + 12) + 1;
+           mux->canvas_height_ = GetLE24(data + 15) + 1;
+         }
+--- libwebp-0.6.1.orig/src/utils/quant_levels_dec_utils.c
++++ libwebp-0.6.1/src/utils/quant_levels_dec_utils.c
+@@ -261,9 +261,15 @@ static void CleanupParams(SmoothParams*
+ 
+ int WebPDequantizeLevels(uint8_t* const data, int width, int height, int stride,
+                          int strength) {
+-  const int radius = 4 * strength / 100;
++  int radius = 4 * strength / 100;
++
+   if (strength < 0 || strength > 100) return 0;
+   if (data == NULL || width <= 0 || height <= 0) return 0;  // bad params
++
++  // limit the filter size to not exceed the image dimensions
++  if (2 * radius + 1 > width) radius = (width - 1) >> 1;
++  if (2 * radius + 1 > height) radius = (height - 1) >> 1;
++
+   if (radius > 0) {
+     SmoothParams p;
+     memset(&p, 0, sizeof(p));

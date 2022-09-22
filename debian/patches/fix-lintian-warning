@@ -1,0 +1,22 @@
+Description: Fix lintian warning on manpage
+ Fix this lintian warning
+   manpage-has-errors-from-man
+   usr/share/man/man1/img2webp.1.gz 44: warning: macro `loop' not defined
+
+Origin: other
+Reviewed-By: Jeff Breidenbach <jab@debian.org>
+Last-Update: 2018-03-01
+
+--- libwebp-0.6.1.orig/man/img2webp.1
++++ libwebp-0.6.1/man/img2webp.1
+@@ -40,8 +40,8 @@ lossy or lossless compression for each f
+ option disables the local option \fB-lossy\fP and \fB-lossless\fP .
+ .TP
+ .BI \-loop " int
+-Specifies the number of times the animation should loop. Using '0' means
+-'loop indefinitely'.
++Specifies the number of times the animation should loop. Using '0'
++means 'loop indefinitely'.
+ .TP
+ .BI \-v
+ Be more verbose.
