@@ -1,4 +1,6 @@
-usr/include/*
-usr/lib/*/lib*.a
-usr/lib/*/lib*.so
-usr/lib/*/pkgconfig/*
+usr/include/webp/*.h
+usr/lib/*/libwebp*.so
+usr/lib/*/libwebp*.a
+usr/lib/*/pkgconfig/libwebp.pc
+usr/lib/*/pkgconfig/libwebp*.pc
+usr/lib/*/cmake/WebP/*

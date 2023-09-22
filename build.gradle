@@ -105,6 +105,14 @@ model {
       sources {
         c {
           source {
+            srcDir "sharpyuv"
+            include "sharpyuv.c"
+            include "sharpyuv_cpu.c"
+            include "sharpyuv_csp.c"
+            include "sharpyuv_dsp.c"
+            include "sharpyuv_gamma.c"
+            include "sharpyuv_neon.c"
+            include "sharpyuv_sse2.c"
             srcDir "src/dec"
             include "alpha_dec.c"
             include "buffer_dec.c"
@@ -141,6 +149,7 @@ model {
             include "lossless_msa.c"
             include "lossless_neon.$NEON"
             include "lossless_sse2.c"
+            include "lossless_sse41.c"
             include "rescaler.c"
             include "rescaler_mips32.c"
             include "rescaler_mips_dsp_r2.c"
@@ -152,11 +161,13 @@ model {
             include "upsampling_msa.c"
             include "upsampling_neon.$NEON"
             include "upsampling_sse2.c"
+            include "upsampling_sse41.c"
             include "yuv.c"
             include "yuv_mips32.c"
             include "yuv_mips_dsp_r2.c"
             include "yuv_neon.$NEON"
             include "yuv_sse2.c"
+            include "yuv_sse41.c"
             srcDir "src/utils"
             include "bit_reader_utils.c"
             include "color_cache_utils.c"
@@ -171,9 +182,9 @@ model {
             include "cost.c"
             include "cost_mips32.c"
             include "cost_mips_dsp_r2.c"
+            include "cost_neon.$NEON"
             include "cost_sse2.c"
             include "enc.c"
-            include "enc_avx2.c"
             include "enc_mips32.c"
             include "enc_mips_dsp_r2.c"
             include "enc_msa.c"
@@ -196,7 +207,6 @@ model {
             include "backward_references_enc.c"
             include "config_enc.c"
             include "cost_enc.c"
-            include "delta_palettization_enc.c"
             include "filter_enc.c"
             include "frame_enc.c"
             include "histogram_enc.c"
@@ -288,6 +298,7 @@ model {
     imagedec(NativeLibrarySpec) {
       binaries {
         all {
+          lib library: "webpdemux", linkage: "static"
           lib library: "webp", linkage: "static"
         }
       }
@@ -330,6 +341,7 @@ model {
           lib library: "example_util", linkage: "static"
           lib library: "imagedec", linkage: "static"
           lib library: "imageio_util", linkage: "static"
+          lib library: "webpdemux", linkage: "static"
           lib library: "webp", linkage: "static"
         }
       }
@@ -350,6 +362,7 @@ model {
           lib library: "imagedec", linkage: "static"
           lib library: "imageenc", linkage: "static"
           lib library: "imageio_util", linkage: "static"
+          lib library: "webpdemux", linkage: "static"
           lib library: "webp"
         }
       }
@@ -389,6 +402,7 @@ model {
           lib library: "imagedec", linkage: "static"
           lib library: "imageio_util", linkage: "static"
           lib library: "webpmux", linkage: "static"
+          lib library: "webpdemux", linkage: "static"
           lib library: "webp"
         }
       }
@@ -426,9 +440,4 @@ model {
       dependsOn $.binaries.findAll { it.buildable }
     }
   }
-}
-
-// Task to generate the wrapper.
-task wrapper(type: Wrapper) {
-  gradleVersion = '2.13'
 }
