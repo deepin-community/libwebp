@@ -29,7 +29,10 @@ FILE* ImgIoUtilSetBinaryMode(FILE* file);
 
 // Allocates storage for entire file 'file_name' and returns contents and size
 // in 'data' and 'data_size'. Returns 1 on success, 0 otherwise. '*data' should
-// be deleted using free().
+// be deleted using WebPFree().
+// Note: for convenience, the data will be null-terminated with an extra byte
+// (not accounted for in *data_size), in case the file is text and intended
+// to be used as a C-string.
 // If 'file_name' is NULL or equal to "-", input is read from stdin by calling
 // the function ImgIoUtilReadFromStdin().
 int ImgIoUtilReadFile(const char* const file_name,
@@ -51,8 +54,8 @@ void ImgIoUtilCopyPlane(const uint8_t* src, int src_stride,
 
 //------------------------------------------------------------------------------
 
-// Returns 0 in case of overflow of nmemb * size.
-int ImgIoUtilCheckSizeArgumentsOverflow(uint64_t nmemb, size_t size);
+// Returns 0 in case of overflow, memory over-allocation or excessive dimension.
+int ImgIoUtilCheckSizeArgumentsOverflow(uint64_t stride, size_t height);
 
 #ifdef __cplusplus
 }    // extern "C"

@@ -26,6 +26,7 @@
     webpmux -set icc image_profile.icc in.webp -o out_icc_container.webp
     webpmux -set exif image_metadata.exif in.webp -o out_exif_container.webp
     webpmux -set xmp image_metadata.xmp in.webp -o out_xmp_container.webp
+    webpmux -set loop 1 in.webp -o out_looped.webp
 
   Extract relevant data from WebP container file:
     webpmux -get frame n in.webp -o out_frame.webp
@@ -47,6 +48,7 @@
     webpmux -info in.webp
     webpmux [ -h | -help ]
     webpmux -version
+    webpmux argument_file_name
 */
 
 #ifdef HAVE_CONFIG_H
@@ -61,6 +63,7 @@
 #include "webp/mux.h"
 #include "../examples/example_util.h"
 #include "../imageio/imageio_util.h"
+#include "./unicode.h"
 
 //------------------------------------------------------------------------------
 // Config object to parse command-line arguments.
@@ -95,6 +98,8 @@ typedef enum {
   FEATURE_ICCP,
   FEATURE_ANMF,
   FEATURE_DURATION,
+  FEATURE_LOOP,
+  FEATURE_BGCOLOR,
   LAST_FEATURE
 } FeatureType;
 
@@ -108,28 +113,26 @@ static const char* const kDescriptions[LAST_FEATURE] = {
 };
 
 typedef struct {
-  FeatureType type_;
-  FeatureArg* args_;
-  int arg_count_;
-} Feature;
+  CommandLineArguments cmd_args_;
 
-typedef struct {
   ActionType action_type_;
   const char* input_;
   const char* output_;
-  Feature feature_;
-} WebPMuxConfig;
+  FeatureType type_;
+  FeatureArg* args_;
+  int arg_count_;
+} Config;
 
 //------------------------------------------------------------------------------
 // Helper functions.
 
-static int CountOccurrences(const char* arglist[], int list_length,
-                            const char* arg) {
+static int CountOccurrences(const CommandLineArguments* const args,
+                            const char* const arg) {
   int i;
   int num_occurences = 0;
 
-  for (i = 0; i < list_length; ++i) {
-    if (!strcmp(arglist[i], arg)) {
+  for (i = 0; i < args->argc_; ++i) {
+    if (!strcmp(args->argv_[i], arg)) {
       ++num_occurences;
     }
   }
@@ -301,6 +304,7 @@ static void PrintHelp(void) {
   printf("       webpmux -info INPUT\n");
   printf("       webpmux [-h|-help]\n");
   printf("       webpmux -version\n");
+  printf("       webpmux argument_file_name\n");
 
   printf("\n");
   printf("GET_OPTIONS:\n");
@@ -312,10 +316,12 @@ static void PrintHelp(void) {
 
   printf("\n");
   printf("SET_OPTIONS:\n");
-  printf(" Set color profile/metadata:\n");
-  printf("   icc  file.icc     set ICC profile\n");
-  printf("   exif file.exif    set EXIF metadata\n");
-  printf("   xmp  file.xmp     set XMP metadata\n");
+  printf(" Set color profile/metadata/parameters:\n");
+  printf("   loop LOOP_COUNT            set the loop count\n");
+  printf("   bgcolor BACKGROUND_COLOR   set the animation background color\n");
+  printf("   icc  file.icc              set ICC profile\n");
+  printf("   exif file.exif             set EXIF metadata\n");
+  printf("   xmp  file.xmp              set XMP metadata\n");
   printf("   where:    'file.icc' contains the ICC profile to be set,\n");
   printf("             'file.exif' contains the EXIF metadata to be set\n");
   printf("             'file.xmp' contains the XMP metadata to be set\n");
@@ -323,7 +329,7 @@ static void PrintHelp(void) {
   printf("\n");
   printf("DURATION_OPTIONS:\n");
   printf(" Set duration of selected frames:\n");
-  printf("   duration            set duration for each frames\n");
+  printf("   duration            set duration for all frames\n");
   printf("   duration,frame      set duration of a particular frame\n");
   printf("   duration,start,end  set duration of frames in the\n");
   printf("                        interval [start,end])\n");
@@ -342,7 +348,7 @@ static void PrintHelp(void) {
   printf("\n");
   printf("FRAME_OPTIONS(i):\n");
   printf(" Create animation:\n");
-  printf("   file_i +di+[xi+yi[+mi[bi]]]\n");
+  printf("   file_i +di[+xi+yi[+mi[bi]]]\n");
   printf("   where:    'file_i' is the i'th animation frame (WebP format),\n");
   printf("             'di' is the pause duration before next frame,\n");
   printf("             'xi','yi' specify the image offset for this frame,\n");
@@ -369,6 +375,10 @@ static void PrintHelp(void) {
 
   printf("\nNote: The nature of EXIF, XMP and ICC data is not checked");
   printf(" and is assumed to be\nvalid.\n");
+  printf("\nNote: if a single file name is passed as the argument, the "
+         "arguments will be\n");
+  printf("tokenized from this file. The file name must not start with "
+         "the character '-'.\n");
 }
 
 static void WarnAboutOddOffset(const WebPMuxFrameInfo* const info) {
@@ -379,40 +389,32 @@ static void WarnAboutOddOffset(const WebPMuxFrameInfo* const info) {
   }
 }
 
-static int ReadFileToWebPData(const char* const filename,
-                              WebPData* const webp_data) {
-  const uint8_t* data;
-  size_t size;
-  if (!ImgIoUtilReadFile(filename, &data, &size)) return 0;
-  webp_data->bytes = data;
-  webp_data->size = size;
-  return 1;
-}
-
 static int CreateMux(const char* const filename, WebPMux** mux) {
   WebPData bitstream;
   assert(mux != NULL);
-  if (!ReadFileToWebPData(filename, &bitstream)) return 0;
+  if (!ExUtilReadFileToWebPData(filename, &bitstream)) return 0;
   *mux = WebPMuxCreate(&bitstream, 1);
-  free((void*)bitstream.bytes);
+  WebPDataClear(&bitstream);
   if (*mux != NULL) return 1;
-  fprintf(stderr, "Failed to create mux object from file %s.\n", filename);
+  WFPRINTF(stderr, "Failed to create mux object from file %s.\n",
+           (const W_CHAR*)filename);
   return 0;
 }
 
 static int WriteData(const char* filename, const WebPData* const webpdata) {
   int ok = 0;
-  FILE* fout = strcmp(filename, "-") ? fopen(filename, "wb")
-                                     : ImgIoUtilSetBinaryMode(stdout);
+  FILE* fout = WSTRCMP(filename, "-") ? WFOPEN(filename, "wb")
+                                      : ImgIoUtilSetBinaryMode(stdout);
   if (fout == NULL) {
-    fprintf(stderr, "Error opening output WebP file %s!\n", filename);
+    WFPRINTF(stderr, "Error opening output WebP file %s!\n",
+             (const W_CHAR*)filename);
     return 0;
   }
   if (fwrite(webpdata->bytes, webpdata->size, 1, fout) != 1) {
-    fprintf(stderr, "Error writing file %s!\n", filename);
+    WFPRINTF(stderr, "Error writing file %s!\n", (const W_CHAR*)filename);
   } else {
-    fprintf(stderr, "Saved file %s (%d bytes)\n",
-            filename, (int)webpdata->size);
+    WFPRINTF(stderr, "Saved file %s (%d bytes)\n",
+             (const W_CHAR*)filename, (int)webpdata->size);
     ok = 1;
   }
   if (fout != stdout) fclose(fout);
@@ -458,7 +460,8 @@ static WebPMux* DuplicateMuxHeader(const WebPMux* const mux) {
     if (err == WEBP_MUX_OK && metadata.size > 0) {
       err = WebPMuxSetChunk(new_mux, kFourccList[i], &metadata, 1);
       if (err != WEBP_MUX_OK) {
-        ERROR_GOTO1("Error transferring metadata in DuplicateMux().", End);
+        ERROR_GOTO1("Error transferring metadata in DuplicateMuxHeader().",
+                    End);
       }
     }
   }
@@ -472,11 +475,11 @@ static WebPMux* DuplicateMuxHeader(const WebPMux* const mux) {
 }
 
 static int ParseFrameArgs(const char* args, WebPMuxFrameInfo* const info) {
-  int dispose_method, dummy;
+  int dispose_method, unused;
   char plus_minus, blend_method;
   const int num_args = sscanf(args, "+%d+%d+%d+%d%c%c+%d", &info->duration,
                               &info->x_offset, &info->y_offset, &dispose_method,
-                              &plus_minus, &blend_method, &dummy);
+                              &plus_minus, &blend_method, &unused);
   switch (num_args) {
     case 1:
       info->x_offset = info->y_offset = 0;  // fall through
@@ -495,7 +498,7 @@ static int ParseFrameArgs(const char* args, WebPMuxFrameInfo* const info) {
 
   WarnAboutOddOffset(info);
 
-  // Note: The sanity of the following conversion is checked by
+  // Note: The validity of the following conversion is checked by
   // WebPMuxPushFrame().
   info->dispose_method = (WebPMuxAnimDispose)dispose_method;
 
@@ -517,9 +520,10 @@ static int ParseBgcolorArgs(const char* args, uint32_t* const bgcolor) {
 //------------------------------------------------------------------------------
 // Clean-up.
 
-static void DeleteConfig(WebPMuxConfig* config) {
+static void DeleteConfig(Config* const config) {
   if (config != NULL) {
-    free(config->feature_.args_);
+    free(config->args_);
+    ExUtilDeleteCommandLineArguments(&config->cmd_args_);
     memset(config, 0, sizeof(*config));
   }
 }
@@ -531,7 +535,7 @@ static void DeleteConfig(WebPMuxConfig* config) {
 // Returns 1 on valid, 0 otherwise.
 // Also fills up num_feature_args to be number of feature arguments given.
 // (e.g. if there are 4 '-frame's and 1 '-loop', then num_feature_args = 5).
-static int ValidateCommandLine(int argc, const char* argv[],
+static int ValidateCommandLine(const CommandLineArguments* const cmd_args,
                                int* num_feature_args) {
   int num_frame_args;
   int num_loop_args;
@@ -543,27 +547,27 @@ static int ValidateCommandLine(int argc, const char* argv[],
   *num_feature_args = 0;
 
   // Simple checks.
-  if (CountOccurrences(argv, argc, "-get") > 1) {
+  if (CountOccurrences(cmd_args, "-get") > 1) {
     ERROR_GOTO1("ERROR: Multiple '-get' arguments specified.\n", ErrValidate);
   }
-  if (CountOccurrences(argv, argc, "-set") > 1) {
+  if (CountOccurrences(cmd_args, "-set") > 1) {
     ERROR_GOTO1("ERROR: Multiple '-set' arguments specified.\n", ErrValidate);
   }
-  if (CountOccurrences(argv, argc, "-strip") > 1) {
+  if (CountOccurrences(cmd_args, "-strip") > 1) {
     ERROR_GOTO1("ERROR: Multiple '-strip' arguments specified.\n", ErrValidate);
   }
-  if (CountOccurrences(argv, argc, "-info") > 1) {
+  if (CountOccurrences(cmd_args, "-info") > 1) {
     ERROR_GOTO1("ERROR: Multiple '-info' arguments specified.\n", ErrValidate);
   }
-  if (CountOccurrences(argv, argc, "-o") > 1) {
+  if (CountOccurrences(cmd_args, "-o") > 1) {
     ERROR_GOTO1("ERROR: Multiple output files specified.\n", ErrValidate);
   }
 
   // Compound checks.
-  num_frame_args = CountOccurrences(argv, argc, "-frame");
-  num_loop_args = CountOccurrences(argv, argc, "-loop");
-  num_bgcolor_args = CountOccurrences(argv, argc, "-bgcolor");
-  num_durations_args = CountOccurrences(argv, argc, "-duration");
+  num_frame_args = CountOccurrences(cmd_args, "-frame");
+  num_loop_args = CountOccurrences(cmd_args, "-loop");
+  num_bgcolor_args = CountOccurrences(cmd_args, "-bgcolor");
+  num_durations_args = CountOccurrences(cmd_args, "-duration");
 
   if (num_loop_args > 1) {
     ERROR_GOTO1("ERROR: Multiple loop counts specified.\n", ErrValidate);
@@ -598,31 +602,38 @@ static int ValidateCommandLine(int argc, const char* argv[],
 
 #define ACTION_IS_NIL (config->action_type_ == NIL_ACTION)
 
-#define FEATURETYPE_IS_NIL (feature->type_ == NIL_FEATURE)
+#define FEATURETYPE_IS_NIL (config->type_ == NIL_FEATURE)
 
-#define CHECK_NUM_ARGS_LESS(NUM, LABEL)                                  \
+#define CHECK_NUM_ARGS_AT_LEAST(NUM, LABEL)                              \
   if (argc < i + (NUM)) {                                                \
     fprintf(stderr, "ERROR: Too few arguments for '%s'.\n", argv[i]);    \
     goto LABEL;                                                          \
   }
 
-#define CHECK_NUM_ARGS_NOT_EQUAL(NUM, LABEL)                             \
-  if (argc != i + (NUM)) {                                               \
+#define CHECK_NUM_ARGS_AT_MOST(NUM, LABEL)                               \
+  if (argc > i + (NUM)) {                                                \
     fprintf(stderr, "ERROR: Too many arguments for '%s'.\n", argv[i]);   \
     goto LABEL;                                                          \
   }
 
+#define CHECK_NUM_ARGS_EXACTLY(NUM, LABEL)                               \
+  CHECK_NUM_ARGS_AT_LEAST(NUM, LABEL);                                   \
+  CHECK_NUM_ARGS_AT_MOST(NUM, LABEL);
+
 // Parses command-line arguments to fill up config object. Also performs some
-// semantic checks.
-static int ParseCommandLine(int argc, const char* argv[],
-                            WebPMuxConfig* config) {
+// semantic checks. unicode_argv contains wchar_t arguments or is null.
+static int ParseCommandLine(Config* config, const W_CHAR** const unicode_argv) {
   int i = 0;
   int feature_arg_index = 0;
   int ok = 1;
+  int argc = config->cmd_args_.argc_;
+  const char* const* argv = config->cmd_args_.argv_;
+  // Unicode file paths will be used if available.
+  const char* const* wargv =
+      (unicode_argv != NULL) ? (const char**)(unicode_argv + 1) : argv;
 
   while (i < argc) {
-    Feature* const feature = &config->feature_;
-    FeatureArg* const arg = &feature->args_[feature_arg_index];
+    FeatureArg* const arg = &config->args_[feature_arg_index];
     if (argv[i][0] == '-') {  // One of the action types or output.
       if (!strcmp(argv[i], "-set")) {
         if (ACTION_IS_NIL) {
@@ -632,14 +643,14 @@ static int ParseCommandLine(int argc, const char* argv[],
         }
         ++i;
       } else if (!strcmp(argv[i], "-duration")) {
-        CHECK_NUM_ARGS_LESS(2, ErrParse);
+        CHECK_NUM_ARGS_AT_LEAST(2, ErrParse);
         if (ACTION_IS_NIL || config->action_type_ == ACTION_DURATION) {
           config->action_type_ = ACTION_DURATION;
         } else {
           ERROR_GOTO1("ERROR: Multiple actions specified.\n", ErrParse);
         }
-        if (FEATURETYPE_IS_NIL || feature->type_ == FEATURE_DURATION) {
-          feature->type_ = FEATURE_DURATION;
+        if (FEATURETYPE_IS_NIL || config->type_ == FEATURE_DURATION) {
+          config->type_ = FEATURE_DURATION;
         } else {
           ERROR_GOTO1("ERROR: Multiple features specified.\n", ErrParse);
         }
@@ -656,37 +667,37 @@ static int ParseCommandLine(int argc, const char* argv[],
       } else if (!strcmp(argv[i], "-strip")) {
         if (ACTION_IS_NIL) {
           config->action_type_ = ACTION_STRIP;
-          feature->arg_count_ = 0;
+          config->arg_count_ = 0;
         } else {
           ERROR_GOTO1("ERROR: Multiple actions specified.\n", ErrParse);
         }
         ++i;
       } else if (!strcmp(argv[i], "-frame")) {
-        CHECK_NUM_ARGS_LESS(3, ErrParse);
+        CHECK_NUM_ARGS_AT_LEAST(3, ErrParse);
         if (ACTION_IS_NIL || config->action_type_ == ACTION_SET) {
           config->action_type_ = ACTION_SET;
         } else {
           ERROR_GOTO1("ERROR: Multiple actions specified.\n", ErrParse);
         }
-        if (FEATURETYPE_IS_NIL || feature->type_ == FEATURE_ANMF) {
-          feature->type_ = FEATURE_ANMF;
+        if (FEATURETYPE_IS_NIL || config->type_ == FEATURE_ANMF) {
+          config->type_ = FEATURE_ANMF;
         } else {
           ERROR_GOTO1("ERROR: Multiple features specified.\n", ErrParse);
         }
         arg->subtype_ = SUBTYPE_ANMF;
-        arg->filename_ = argv[i + 1];
+        arg->filename_ = wargv[i + 1];
         arg->params_ = argv[i + 2];
         ++feature_arg_index;
         i += 3;
       } else if (!strcmp(argv[i], "-loop") || !strcmp(argv[i], "-bgcolor")) {
-        CHECK_NUM_ARGS_LESS(2, ErrParse);
+        CHECK_NUM_ARGS_AT_LEAST(2, ErrParse);
         if (ACTION_IS_NIL || config->action_type_ == ACTION_SET) {
           config->action_type_ = ACTION_SET;
         } else {
           ERROR_GOTO1("ERROR: Multiple actions specified.\n", ErrParse);
         }
-        if (FEATURETYPE_IS_NIL || feature->type_ == FEATURE_ANMF) {
-          feature->type_ = FEATURE_ANMF;
+        if (FEATURETYPE_IS_NIL || config->type_ == FEATURE_ANMF) {
+          config->type_ = FEATURE_ANMF;
         } else {
           ERROR_GOTO1("ERROR: Multiple features specified.\n", ErrParse);
         }
@@ -696,34 +707,36 @@ static int ParseCommandLine(int argc, const char* argv[],
         ++feature_arg_index;
         i += 2;
       } else if (!strcmp(argv[i], "-o")) {
-        CHECK_NUM_ARGS_LESS(2, ErrParse);
-        config->output_ = argv[i + 1];
+        CHECK_NUM_ARGS_AT_LEAST(2, ErrParse);
+        config->output_ = wargv[i + 1];
         i += 2;
       } else if (!strcmp(argv[i], "-info")) {
-        CHECK_NUM_ARGS_NOT_EQUAL(2, ErrParse);
+        CHECK_NUM_ARGS_EXACTLY(2, ErrParse);
         if (config->action_type_ != NIL_ACTION) {
           ERROR_GOTO1("ERROR: Multiple actions specified.\n", ErrParse);
         } else {
           config->action_type_ = ACTION_INFO;
-          feature->arg_count_ = 0;
-          config->input_ = argv[i + 1];
+          config->arg_count_ = 0;
+          config->input_ = wargv[i + 1];
         }
         i += 2;
       } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "-help")) {
         PrintHelp();
         DeleteConfig(config);
+        LOCAL_FREE((W_CHAR** const)unicode_argv);
         exit(0);
       } else if (!strcmp(argv[i], "-version")) {
         const int version = WebPGetMuxVersion();
         printf("%d.%d.%d\n",
                (version >> 16) & 0xff, (version >> 8) & 0xff, version & 0xff);
         DeleteConfig(config);
+        LOCAL_FREE((W_CHAR** const)unicode_argv);
         exit(0);
       } else if (!strcmp(argv[i], "--")) {
         if (i < argc - 1) {
           ++i;
           if (config->input_ == NULL) {
-            config->input_ = argv[i];
+            config->input_ = wargv[i];
           } else {
             ERROR_GOTO2("ERROR at '%s': Multiple input files specified.\n",
                         argv[i], ErrParse);
@@ -741,14 +754,14 @@ static int ParseCommandLine(int argc, const char* argv[],
       if (!strcmp(argv[i], "icc") || !strcmp(argv[i], "exif") ||
           !strcmp(argv[i], "xmp")) {
         if (FEATURETYPE_IS_NIL) {
-          feature->type_ = (!strcmp(argv[i], "icc")) ? FEATURE_ICCP :
+          config->type_ = (!strcmp(argv[i], "icc")) ? FEATURE_ICCP :
               (!strcmp(argv[i], "exif")) ? FEATURE_EXIF : FEATURE_XMP;
         } else {
           ERROR_GOTO1("ERROR: Multiple features specified.\n", ErrParse);
         }
         if (config->action_type_ == ACTION_SET) {
-          CHECK_NUM_ARGS_LESS(2, ErrParse);
-          arg->filename_ = argv[i + 1];
+          CHECK_NUM_ARGS_AT_LEAST(2, ErrParse);
+          arg->filename_ = wargv[i + 1];
           ++feature_arg_index;
           i += 2;
         } else {
@@ -756,14 +769,28 @@ static int ParseCommandLine(int argc, const char* argv[],
         }
       } else if (!strcmp(argv[i], "frame") &&
                  (config->action_type_ == ACTION_GET)) {
-        CHECK_NUM_ARGS_LESS(2, ErrParse);
-        feature->type_ = FEATURE_ANMF;
+        CHECK_NUM_ARGS_AT_LEAST(2, ErrParse);
+        config->type_ = FEATURE_ANMF;
+        arg->params_ = argv[i + 1];
+        ++feature_arg_index;
+        i += 2;
+      } else if (!strcmp(argv[i], "loop") &&
+                 (config->action_type_ == ACTION_SET)) {
+        CHECK_NUM_ARGS_AT_LEAST(2, ErrParse);
+        config->type_ = FEATURE_LOOP;
+        arg->params_ = argv[i + 1];
+        ++feature_arg_index;
+        i += 2;
+      } else if (!strcmp(argv[i], "bgcolor") &&
+                 (config->action_type_ == ACTION_SET)) {
+        CHECK_NUM_ARGS_AT_LEAST(2, ErrParse);
+        config->type_ = FEATURE_BGCOLOR;
         arg->params_ = argv[i + 1];
         ++feature_arg_index;
         i += 2;
       } else {  // Assume input file.
         if (config->input_ == NULL) {
-          config->input_ = argv[i];
+          config->input_ = wargv[i];
         } else {
           ERROR_GOTO2("ERROR at '%s': Multiple input files specified.\n",
                       argv[i], ErrParse);
@@ -777,9 +804,8 @@ static int ParseCommandLine(int argc, const char* argv[],
 }
 
 // Additional checks after config is filled.
-static int ValidateConfig(WebPMuxConfig* config) {
+static int ValidateConfig(Config* const config) {
   int ok = 1;
-  Feature* const feature = &config->feature_;
 
   // Action.
   if (ACTION_IS_NIL) {
@@ -795,7 +821,7 @@ static int ValidateConfig(WebPMuxConfig* config) {
   if (config->input_ == NULL) {
     if (config->action_type_ != ACTION_SET) {
       ERROR_GOTO1("ERROR: No input file specified.\n", ErrValidate2);
-    } else if (feature->type_ != FEATURE_ANMF) {
+    } else if (config->type_ != FEATURE_ANMF) {
       ERROR_GOTO1("ERROR: No input file specified.\n", ErrValidate2);
     }
   }
@@ -810,28 +836,29 @@ static int ValidateConfig(WebPMuxConfig* config) {
 }
 
 // Create config object from command-line arguments.
-static int InitializeConfig(int argc, const char* argv[],
-                            WebPMuxConfig* config) {
+static int InitializeConfig(int argc, const char* argv[], Config* const config,
+                            const W_CHAR** const unicode_argv) {
   int num_feature_args = 0;
-  int ok = 1;
+  int ok;
 
-  assert(config != NULL);
   memset(config, 0, sizeof(*config));
 
+  ok = ExUtilInitCommandLineArguments(argc, argv, &config->cmd_args_);
+  if (!ok) return 0;
+
   // Validate command-line arguments.
-  if (!ValidateCommandLine(argc, argv, &num_feature_args)) {
+  if (!ValidateCommandLine(&config->cmd_args_, &num_feature_args)) {
     ERROR_GOTO1("Exiting due to command-line parsing error.\n", Err1);
   }
 
-  config->feature_.arg_count_ = num_feature_args;
-  config->feature_.args_ =
-      (FeatureArg*)calloc(num_feature_args, sizeof(*config->feature_.args_));
-  if (config->feature_.args_ == NULL) {
+  config->arg_count_ = num_feature_args;
+  config->args_ = (FeatureArg*)calloc(num_feature_args, sizeof(*config->args_));
+  if (config->args_ == NULL) {
     ERROR_GOTO1("ERROR: Memory allocation error.\n", Err1);
   }
 
   // Parse command-line.
-  if (!ParseCommandLine(argc, argv, config) || !ValidateConfig(config)) {
+  if (!ParseCommandLine(config, unicode_argv) || !ValidateConfig(config)) {
     ERROR_GOTO1("Exiting due to command-line parsing error.\n", Err1);
   }
 
@@ -841,13 +868,14 @@ static int InitializeConfig(int argc, const char* argv[],
 
 #undef ACTION_IS_NIL
 #undef FEATURETYPE_IS_NIL
-#undef CHECK_NUM_ARGS_LESS
-#undef CHECK_NUM_ARGS_MORE
+#undef CHECK_NUM_ARGS_AT_LEAST
+#undef CHECK_NUM_ARGS_AT_MOST
+#undef CHECK_NUM_ARGS_EXACTLY
 
 //------------------------------------------------------------------------------
 // Processing.
 
-static int GetFrame(const WebPMux* mux, const WebPMuxConfig* config) {
+static int GetFrame(const WebPMux* mux, const Config* config) {
   WebPMuxError err = WEBP_MUX_OK;
   WebPMux* mux_single = NULL;
   int num = 0;
@@ -857,7 +885,7 @@ static int GetFrame(const WebPMux* mux, const WebPMuxConfig* config) {
   WebPMuxFrameInfo info;
   WebPDataInit(&info.bitstream);
 
-  num = ExUtilGetInt(config->feature_.args_[0].params_, 10, &parse_error);
+  num = ExUtilGetInt(config->args_[0].params_, 10, &parse_error);
   if (num < 0) {
     ERROR_GOTO1("ERROR: Frame/Fragment index must be non-negative.\n", ErrGet);
   }
@@ -891,18 +919,17 @@ static int GetFrame(const WebPMux* mux, const WebPMuxConfig* config) {
 }
 
 // Read and process config.
-static int Process(const WebPMuxConfig* config) {
+static int Process(const Config* config) {
   WebPMux* mux = NULL;
   WebPData chunk;
   WebPMuxError err = WEBP_MUX_OK;
   int ok = 1;
-  const Feature* const feature = &config->feature_;
 
   switch (config->action_type_) {
     case ACTION_GET: {
       ok = CreateMux(config->input_, &mux);
       if (!ok) goto Err2;
-      switch (feature->type_) {
+      switch (config->type_) {
         case FEATURE_ANMF:
           ok = GetFrame(mux, config);
           break;
@@ -910,10 +937,10 @@ static int Process(const WebPMuxConfig* config) {
         case FEATURE_ICCP:
         case FEATURE_EXIF:
         case FEATURE_XMP:
-          err = WebPMuxGetChunk(mux, kFourccList[feature->type_], &chunk);
+          err = WebPMuxGetChunk(mux, kFourccList[config->type_], &chunk);
           if (err != WEBP_MUX_OK) {
             ERROR_GOTO3("ERROR (%s): Could not get the %s.\n",
-                        ErrorString(err), kDescriptions[feature->type_], Err2);
+                        ErrorString(err), kDescriptions[config->type_], Err2);
           }
           ok = WriteData(config->output_, &chunk);
           break;
@@ -925,7 +952,7 @@ static int Process(const WebPMuxConfig* config) {
       break;
     }
     case ACTION_SET: {
-      switch (feature->type_) {
+      switch (config->type_) {
         case FEATURE_ANMF: {
           int i;
           WebPMuxAnimParams params = { 0xFFFFFFFF, 0 };
@@ -934,11 +961,11 @@ static int Process(const WebPMuxConfig* config) {
             ERROR_GOTO2("ERROR (%s): Could not allocate a mux object.\n",
                         ErrorString(WEBP_MUX_MEMORY_ERROR), Err2);
           }
-          for (i = 0; i < feature->arg_count_; ++i) {
-            switch (feature->args_[i].subtype_) {
+          for (i = 0; i < config->arg_count_; ++i) {
+            switch (config->args_[i].subtype_) {
               case SUBTYPE_BGCOLOR: {
                 uint32_t bgcolor;
-                ok = ParseBgcolorArgs(feature->args_[i].params_, &bgcolor);
+                ok = ParseBgcolorArgs(config->args_[i].params_, &bgcolor);
                 if (!ok) {
                   ERROR_GOTO1("ERROR: Could not parse the background color \n",
                               Err2);
@@ -949,7 +976,7 @@ static int Process(const WebPMuxConfig* config) {
               case SUBTYPE_LOOP: {
                 int parse_error = 0;
                 const int loop_count =
-                    ExUtilGetInt(feature->args_[i].params_, 10, &parse_error);
+                    ExUtilGetInt(config->args_[i].params_, 10, &parse_error);
                 if (loop_count < 0 || loop_count > 65535) {
                   // Note: This is only a 'necessary' condition for loop_count
                   // to be valid. The 'sufficient' conditioned in checked in
@@ -965,10 +992,10 @@ static int Process(const WebPMuxConfig* config) {
               case SUBTYPE_ANMF: {
                 WebPMuxFrameInfo frame;
                 frame.id = WEBP_CHUNK_ANMF;
-                ok = ReadFileToWebPData(feature->args_[i].filename_,
-                                        &frame.bitstream);
+                ok = ExUtilReadFileToWebPData(config->args_[i].filename_,
+                                              &frame.bitstream);
                 if (!ok) goto Err2;
-                ok = ParseFrameArgs(feature->args_[i].params_, &frame);
+                ok = ParseFrameArgs(config->args_[i].params_, &frame);
                 if (!ok) {
                   WebPDataClear(&frame.bitstream);
                   ERROR_GOTO1("ERROR: Could not parse frame properties.\n",
@@ -1001,13 +1028,62 @@ static int Process(const WebPMuxConfig* config) {
         case FEATURE_XMP: {
           ok = CreateMux(config->input_, &mux);
           if (!ok) goto Err2;
-          ok = ReadFileToWebPData(feature->args_[0].filename_, &chunk);
+          ok = ExUtilReadFileToWebPData(config->args_[0].filename_, &chunk);
           if (!ok) goto Err2;
-          err = WebPMuxSetChunk(mux, kFourccList[feature->type_], &chunk, 1);
-          free((void*)chunk.bytes);
+          err = WebPMuxSetChunk(mux, kFourccList[config->type_], &chunk, 1);
+          WebPDataClear(&chunk);
           if (err != WEBP_MUX_OK) {
             ERROR_GOTO3("ERROR (%s): Could not set the %s.\n",
-                        ErrorString(err), kDescriptions[feature->type_], Err2);
+                        ErrorString(err), kDescriptions[config->type_], Err2);
+          }
+          break;
+        }
+        case FEATURE_LOOP: {
+          WebPMuxAnimParams params = { 0xFFFFFFFF, 0 };
+          int parse_error = 0;
+          const int loop_count =
+              ExUtilGetInt(config->args_[0].params_, 10, &parse_error);
+          if (loop_count < 0 || loop_count > 65535 || parse_error) {
+            ERROR_GOTO1("ERROR: Loop count must be in the range 0 to 65535.\n",
+                        Err2);
+          }
+          ok = CreateMux(config->input_, &mux);
+          if (!ok) goto Err2;
+          ok = (WebPMuxGetAnimationParams(mux, &params) == WEBP_MUX_OK);
+          if (!ok) {
+            ERROR_GOTO1("ERROR: input file does not seem to be an animation.\n",
+                        Err2);
+          }
+          params.loop_count = loop_count;
+          err = WebPMuxSetAnimationParams(mux, &params);
+          ok = (err == WEBP_MUX_OK);
+          if (!ok) {
+            ERROR_GOTO2("ERROR (%s): Could not set animation parameters.\n",
+                        ErrorString(err), Err2);
+          }
+          break;
+        }
+        case FEATURE_BGCOLOR: {
+          WebPMuxAnimParams params = { 0xFFFFFFFF, 0 };
+          uint32_t bgcolor;
+          ok = ParseBgcolorArgs(config->args_[0].params_, &bgcolor);
+          if (!ok) {
+            ERROR_GOTO1("ERROR: Could not parse the background color.\n",
+                        Err2);
+          }
+          ok = CreateMux(config->input_, &mux);
+          if (!ok) goto Err2;
+          ok = (WebPMuxGetAnimationParams(mux, &params) == WEBP_MUX_OK);
+          if (!ok) {
+            ERROR_GOTO1("ERROR: input file does not seem to be an animation.\n",
+                        Err2);
+          }
+          params.bgcolor = bgcolor;
+          err = WebPMuxSetAnimationParams(mux, &params);
+          ok = (err == WEBP_MUX_OK);
+          if (!ok) {
+            ERROR_GOTO2("ERROR (%s): Could not set animation parameters.\n",
+                        ErrorString(err), Err2);
           }
           break;
         }
@@ -1038,16 +1114,16 @@ static int Process(const WebPMuxConfig* config) {
         int* durations = NULL;
         WebPMux* new_mux = DuplicateMuxHeader(mux);
         if (new_mux == NULL) goto Err2;
-        durations = (int*)malloc((size_t)num_frames * sizeof(*durations));
+        durations = (int*)WebPMalloc((size_t)num_frames * sizeof(*durations));
         if (durations == NULL) goto Err2;
         for (i = 0; i < num_frames; ++i) durations[i] = -1;
 
         // Parse intervals to process.
-        for (i = 0; i < feature->arg_count_; ++i) {
+        for (i = 0; i < config->arg_count_; ++i) {
           int k;
           int args[3];
           int duration, start, end;
-          const int nb_args = ExUtilGetInts(feature->args_[i].params_,
+          const int nb_args = ExUtilGetInts(config->args_[i].params_,
                                             10, 3, args);
           ok = (nb_args >= 1);
           if (!ok) goto Err3;
@@ -1096,7 +1172,7 @@ static int Process(const WebPMuxConfig* config) {
         new_mux = NULL;
 
  Err3:
-        free(durations);
+        WebPFree(durations);
         WebPMuxDelete(new_mux);
         if (!ok) goto Err2;
       }
@@ -1105,12 +1181,12 @@ static int Process(const WebPMuxConfig* config) {
     case ACTION_STRIP: {
       ok = CreateMux(config->input_, &mux);
       if (!ok) goto Err2;
-      if (feature->type_ == FEATURE_ICCP || feature->type_ == FEATURE_EXIF ||
-          feature->type_ == FEATURE_XMP) {
-        err = WebPMuxDeleteChunk(mux, kFourccList[feature->type_]);
+      if (config->type_ == FEATURE_ICCP || config->type_ == FEATURE_EXIF ||
+          config->type_ == FEATURE_XMP) {
+        err = WebPMuxDeleteChunk(mux, kFourccList[config->type_]);
         if (err != WEBP_MUX_OK) {
           ERROR_GOTO3("ERROR (%s): Could not strip the %s.\n",
-                      ErrorString(err), kDescriptions[feature->type_], Err2);
+                      ErrorString(err), kDescriptions[config->type_], Err2);
         }
       } else {
         ERROR_GOTO1("ERROR: Invalid feature for action 'strip'.\n", Err2);
@@ -1140,15 +1216,19 @@ static int Process(const WebPMuxConfig* config) {
 // Main.
 
 int main(int argc, const char* argv[]) {
-  WebPMuxConfig config;
-  int ok = InitializeConfig(argc - 1, argv + 1, &config);
+  Config config;
+  int ok;
+
+  INIT_WARGV(argc, argv);
+
+  ok = InitializeConfig(argc - 1, argv + 1, &config, GET_WARGV_OR_NULL());
   if (ok) {
     ok = Process(&config);
   } else {
     PrintHelp();
   }
   DeleteConfig(&config);
-  return !ok;
+  FREE_WARGV_AND_RETURN(!ok);
 }
 
 //------------------------------------------------------------------------------

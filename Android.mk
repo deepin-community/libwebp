@@ -1,3 +1,5 @@
+# Ignore this file during non-NDK builds.
+ifdef NDK_ROOT
 LOCAL_PATH := $(call my-dir)
 
 WEBP_CFLAGS := -Wall -DANDROID -DHAVE_MALLOC_H -DHAVE_PTHREAD -DWEBP_USE_THREAD
@@ -32,6 +34,15 @@ ifneq ($(findstring armeabi-v7a, $(TARGET_ARCH_ABI)),)
 else
   NEON := c
 endif
+
+sharpyuv_srcs := \
+    sharpyuv/sharpyuv.c \
+    sharpyuv/sharpyuv_cpu.c \
+    sharpyuv/sharpyuv_csp.c \
+    sharpyuv/sharpyuv_dsp.c \
+    sharpyuv/sharpyuv_gamma.c \
+    sharpyuv/sharpyuv_neon.$(NEON) \
+    sharpyuv/sharpyuv_sse2.c \
 
 dec_srcs := \
     src/dec/alpha_dec.c \
@@ -74,6 +85,7 @@ dsp_dec_srcs := \
     src/dsp/lossless_msa.c \
     src/dsp/lossless_neon.$(NEON) \
     src/dsp/lossless_sse2.c \
+    src/dsp/lossless_sse41.c \
     src/dsp/rescaler.c \
     src/dsp/rescaler_mips32.c \
     src/dsp/rescaler_mips_dsp_r2.c \
@@ -85,19 +97,21 @@ dsp_dec_srcs := \
     src/dsp/upsampling_msa.c \
     src/dsp/upsampling_neon.$(NEON) \
     src/dsp/upsampling_sse2.c \
+    src/dsp/upsampling_sse41.c \
     src/dsp/yuv.c \
     src/dsp/yuv_mips32.c \
     src/dsp/yuv_mips_dsp_r2.c \
     src/dsp/yuv_neon.$(NEON) \
     src/dsp/yuv_sse2.c \
+    src/dsp/yuv_sse41.c \
 
 dsp_enc_srcs := \
     src/dsp/cost.c \
     src/dsp/cost_mips32.c \
     src/dsp/cost_mips_dsp_r2.c \
+    src/dsp/cost_neon.$(NEON) \
     src/dsp/cost_sse2.c \
     src/dsp/enc.c \
-    src/dsp/enc_avx2.c \
     src/dsp/enc_mips32.c \
     src/dsp/enc_mips_dsp_r2.c \
     src/dsp/enc_msa.c \
@@ -121,7 +135,6 @@ enc_srcs := \
     src/enc/backward_references_enc.c \
     src/enc/config_enc.c \
     src/enc/cost_enc.c \
-    src/enc/delta_palettization_enc.c \
     src/enc/filter_enc.c \
     src/enc/frame_enc.c \
     src/enc/histogram_enc.c \
@@ -173,7 +186,7 @@ LOCAL_SRC_FILES := \
     $(utils_dec_srcs) \
 
 LOCAL_CFLAGS := $(WEBP_CFLAGS)
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/src
+LOCAL_EXPORT_C_INCLUDES += $(LOCAL_PATH)/src
 
 # prefer arm over thumb mode for performance gains
 LOCAL_ARM_MODE := arm
@@ -202,12 +215,13 @@ endif  # ENABLE_SHARED=1
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
+    $(sharpyuv_srcs) \
     $(dsp_enc_srcs) \
     $(enc_srcs) \
     $(utils_enc_srcs) \
 
 LOCAL_CFLAGS := $(WEBP_CFLAGS)
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/src
+LOCAL_EXPORT_C_INCLUDES += $(LOCAL_PATH)/src $(LOCAL_PATH)
 
 # prefer arm over thumb mode for performance gains
 LOCAL_ARM_MODE := arm
@@ -230,7 +244,7 @@ include $(CLEAR_VARS)
 LOCAL_SRC_FILES := $(demux_srcs)
 
 LOCAL_CFLAGS := $(WEBP_CFLAGS)
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/src
+LOCAL_EXPORT_C_INCLUDES += $(LOCAL_PATH)/src
 
 # prefer arm over thumb mode for performance gains
 LOCAL_ARM_MODE := arm
@@ -253,7 +267,7 @@ include $(CLEAR_VARS)
 LOCAL_SRC_FILES := $(mux_srcs)
 
 LOCAL_CFLAGS := $(WEBP_CFLAGS)
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/src
+LOCAL_EXPORT_C_INCLUDES += $(LOCAL_PATH)/src
 
 # prefer arm over thumb mode for performance gains
 LOCAL_ARM_MODE := arm
@@ -277,3 +291,4 @@ include $(WEBP_SRC_PATH)/examples/Android.mk
 ifeq ($(USE_CPUFEATURES),yes)
   $(call import-module,android/cpufeatures)
 endif
+endif  # NDK_ROOT

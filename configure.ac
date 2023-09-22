@@ -1,6 +1,6 @@
-AC_INIT([libwebp], [0.6.1],
+AC_INIT([libwebp], [1.3.2],
         [https://bugs.chromium.org/p/webp],,
-        [http://developers.google.com/speed/webp])
+        [https://developers.google.com/speed/webp])
 AC_CANONICAL_HOST
 AC_PREREQ([2.60])
 AM_INIT_AUTOMAKE([-Wall foreign subdir-objects])
@@ -9,7 +9,8 @@ dnl === automake >= 1.12 requires this for 'unusual archivers' support.
 dnl === it must occur before LT_INIT (AC_PROG_LIBTOOL).
 m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
 
-AC_PROG_LIBTOOL
+dnl === AC_PROG_LIBTOOL is deprecated.
+m4_ifdef([LT_INIT], [LT_INIT], [AC_PROG_LIBTOOL])
 AC_PROG_SED
 AM_PROG_CC_C_O
 
@@ -27,10 +28,45 @@ AC_ARG_ENABLE([everything],
               AS_HELP_STRING([--enable-everything],
                              [Enable all optional targets. These can still be
                               disabled with --disable-target]),
-              [SET_IF_UNSET([enable_libwebpdecoder], [$enableval])
+              [SET_IF_UNSET([enable_libsharpyuv], [$enableval])
+               SET_IF_UNSET([enable_libwebpdecoder], [$enableval])
                SET_IF_UNSET([enable_libwebpdemux], [$enableval])
                SET_IF_UNSET([enable_libwebpextras], [$enableval])
                SET_IF_UNSET([enable_libwebpmux], [$enableval])])
+
+dnl === Check whether libwebpmux should be built
+AC_MSG_CHECKING(whether libwebpmux is to be built)
+AC_ARG_ENABLE([libwebpmux],
+              AS_HELP_STRING([--disable-libwebpmux],
+                             [Disable libwebpmux @<:@default=no@:>@]),
+              [], [enable_libwebpmux=yes])
+AC_MSG_RESULT(${enable_libwebpmux-no})
+AM_CONDITIONAL([BUILD_MUX], [test "$enable_libwebpmux" = "yes"])
+
+dnl === Check whether libwebpdemux should be built
+AC_MSG_CHECKING(whether libwebpdemux is to be built)
+AC_ARG_ENABLE([libwebpdemux],
+              AS_HELP_STRING([--disable-libwebpdemux],
+                             [Disable libwebpdemux @<:@default=no@:>@]),
+              [], [enable_libwebpdemux=yes])
+AC_MSG_RESULT(${enable_libwebpdemux-no})
+AM_CONDITIONAL([BUILD_DEMUX], [test "$enable_libwebpdemux" = "yes"])
+
+dnl === Check whether decoder library should be built.
+AC_MSG_CHECKING(whether decoder library is to be built)
+AC_ARG_ENABLE([libwebpdecoder],
+              AS_HELP_STRING([--enable-libwebpdecoder],
+                             [Build libwebpdecoder @<:@default=no@:>@]))
+AC_MSG_RESULT(${enable_libwebpdecoder-no})
+AM_CONDITIONAL([BUILD_LIBWEBPDECODER], [test "$enable_libwebpdecoder" = "yes"])
+
+dnl === Check whether libwebpextras should be built
+AC_MSG_CHECKING(whether libwebpextras is to be built)
+AC_ARG_ENABLE([libwebpextras],
+              AS_HELP_STRING([--enable-libwebpextras],
+                             [Build libwebpextras @<:@default=no@:>@]))
+AC_MSG_RESULT(${enable_libwebpextras-no})
+AM_CONDITIONAL([BUILD_EXTRAS], [test "$enable_libwebpextras" = "yes"])
 
 dnl === If --enable-asserts is not defined, define NDEBUG
 
@@ -80,6 +116,7 @@ TEST_AND_ADD_CFLAGS([AM_CFLAGS], [-Wparentheses-equality])
 TEST_AND_ADD_CFLAGS([AM_CFLAGS], [-Wshadow])
 TEST_AND_ADD_CFLAGS([AM_CFLAGS], [-Wshorten-64-to-32])
 TEST_AND_ADD_CFLAGS([AM_CFLAGS], [-Wundef])
+TEST_AND_ADD_CFLAGS([AM_CFLAGS], [-Wunreachable-code-aggressive])
 TEST_AND_ADD_CFLAGS([AM_CFLAGS], [-Wunreachable-code])
 TEST_AND_ADD_CFLAGS([AM_CFLAGS], [-Wunused-but-set-variable])
 TEST_AND_ADD_CFLAGS([AM_CFLAGS], [-Wunused])
@@ -122,31 +159,6 @@ AS_IF([test "$GCC" = "yes" ], [
 AC_SUBST([AM_CFLAGS])
 
 dnl === Check for machine specific flags
-AC_ARG_ENABLE([avx2],
-              AS_HELP_STRING([--disable-avx2],
-                             [Disable detection of AVX2 support
-                              @<:@default=auto@:>@]))
-
-AS_IF([test "x$enable_avx2" != "xno" -a "x$enable_sse4_1" != "xno" \
-         -a "x$enable_sse2" != "xno"], [
-  AVX2_CFLAGS="$INTRINSICS_CFLAGS $AVX2_FLAGS"
-  TEST_AND_ADD_CFLAGS([AVX2_FLAGS], [-mavx2])
-  AS_IF([test -n "$AVX2_FLAGS"], [
-    SAVED_CFLAGS=$CFLAGS
-    CFLAGS="$CFLAGS $AVX2_FLAGS"
-    AC_CHECK_HEADER([immintrin.h],
-                    [AC_DEFINE(WEBP_HAVE_AVX2, [1],
-                     [Set to 1 if AVX2 is supported])],
-                    [AVX2_FLAGS=""],
-                    dnl it's illegal to directly include avx2intrin.h, but it's
-                    dnl included conditionally in immintrin.h, tricky!
-                    [#ifndef __AVX2__
-                     #error avx2 is not enabled
-                     #endif
-                    ])
-    CFLAGS=$SAVED_CFLAGS])
-  AC_SUBST([AVX2_FLAGS])])
-
 AC_ARG_ENABLE([sse4.1],
               AS_HELP_STRING([--disable-sse4.1],
                              [Disable detection of SSE4.1 support
@@ -249,6 +261,9 @@ AS_IF([test "x$enable_neon" != "xno"], [
         *android*) AC_CHECK_HEADERS([cpu-features.h]) ;;
       esac
       ;;
+    aarch64*|arm64*)
+      AC_DEFINE(WEBP_HAVE_NEON, [1], [Set to 1 if NEON is supported])
+      ;;
   esac
   AC_SUBST([NEON_FLAGS])])
 
@@ -347,6 +362,8 @@ AS_IF([test "x$enable_gl" != "xno"], [
       # override with --with-gl*
       glut_cflags="$glut_cflags|-framework GLUT -framework OpenGL"
       glut_ldflags="$glut_ldflags|-framework GLUT -framework OpenGL"
+      # quiet deprecation warnings for glut
+      TEST_AND_ADD_CFLAGS([AM_CFLAGS], [-Wno-deprecated-declarations])
       ;;
   esac
 
@@ -431,6 +448,10 @@ AS_IF([test "x$enable_gl" != "xno"], [
 
   if test "$glut_support" = "yes" -a "$enable_libwebpdemux" = "yes"; then
     build_vwebp=yes
+  else
+    AC_MSG_NOTICE(
+      m4_normalize([Not building vwebp.
+                    OpenGL libraries and --enable-libwebpdemux are required.]))
   fi
 ])
 AM_CONDITIONAL([BUILD_VWEBP], [test "$build_vwebp" = "yes"])
@@ -443,31 +464,54 @@ AC_ARG_ENABLE([sdl],
                               @<:@default=auto@:>@]))
 AS_IF([test "x$enable_sdl" != "xno"], [
   CLEAR_LIBVARS([SDL])
+  AC_PATH_PROGS([LIBSDL_CONFIG], [sdl-config])
+  if test -n "$LIBSDL_CONFIG"; then
+    SDL_INCLUDES=`$LIBSDL_CONFIG --cflags`
+    SDL_LIBS="`$LIBSDL_CONFIG --libs`"
+  fi
+
   WITHLIB_OPTION([sdl], [SDL])
 
   sdl_header="no"
   LIBCHECK_PROLOGUE([SDL])
-  AC_CHECK_HEADER([SDL/SDL.h], [sdl_header="SDL_SDL.h"],
+  AC_CHECK_HEADER([SDL/SDL.h], [sdl_header="SDL/SDL.h"],
                   [AC_CHECK_HEADER([SDL.h], [sdl_header="SDL.h"],
                   [AC_MSG_WARN(SDL library not available - no sdl.h)])])
   if test x"$sdl_header" != "xno"; then
-    AC_CHECK_LIB(SDL, SDL_Init,
-                 [SDL_LIBS="-lSDL"
-                  SDL_INCLUDES="-DWEBP_HAVE_SDL"
-                  AC_DEFINE(WEBP_HAVE_SDL, [1],
-                            [Set to 1 if SDL library is installed])
-                  sdl_support=yes
-                 ],
-                 AC_MSG_WARN(Optional SDL library not found),
-                 [$MATH_LIBS])
+    AC_LANG_PUSH(C)
+    SDL_SAVED_LIBS="$LIBS"
+    for lib in "" "-lSDL" "-lSDLmain -lSDL"; do
+      LIBS="$SDL_SAVED_LIBS $lib"
+      # Perform a full link to ensure SDL_main is resolved if needed.
+      AC_LINK_IFELSE(
+        [AC_LANG_SOURCE([
+           #include <$sdl_header>
+           int main(int argc, char** argv) {
+             SDL_Init(0);
+             return 0;
+           }])],
+        [SDL_LIBS="$LDFLAGS $LIBS"
+         SDL_INCLUDES="$SDL_INCLUDES -DWEBP_HAVE_SDL"
+         AC_DEFINE(WEBP_HAVE_SDL, [1],
+                   [Set to 1 if SDL library is installed])
+         sdl_support=yes]
+      )
+      if test x"$sdl_support" = "xyes"; then
+        break
+      fi
+    done
+    # LIBS is restored by LIBCHECK_EPILOGUE
+    AC_LANG_POP
     if test x"$sdl_header" = "xSDL.h"; then
       SDL_INCLUDES="$SDL_INCLUDES -DWEBP_HAVE_JUST_SDL_H"
     fi
   fi
   LIBCHECK_EPILOGUE([SDL])
 
-  if test "$sdl_support" = "yes"; then
+  if test x"$sdl_support" = "xyes"; then
     build_vwebp_sdl=yes
+  else
+    AC_MSG_NOTICE([Not building vwebp-sdl. SDL library is required.])
   fi
 ])
 
@@ -591,23 +635,35 @@ AS_IF([test "x$enable_gif" != "xno"], [
   if test "$gif_support" = "yes" -a \
           "$enable_libwebpdemux" = "yes"; then
     build_anim_diff=yes
+  else
+    AC_MSG_NOTICE(
+      [Not building anim_diff. libgif and --enable-libwebpdemux are required.])
   fi
 
   if test "$gif_support" = "yes" -a \
           "$enable_libwebpmux" = "yes"; then
     build_gif2webp=yes
+  else
+    AC_MSG_NOTICE(
+      [Not building gif2webp. libgif and --enable-libwebpmux are required.])
   fi
 ])
 AM_CONDITIONAL([BUILD_ANIMDIFF], [test "${build_anim_diff}" = "yes"])
 AM_CONDITIONAL([BUILD_GIF2WEBP], [test "${build_gif2webp}" = "yes"])
 
-if test "$enable_libwebpmux" = "yes"; then
+if test "$enable_libwebpdemux" = "yes" -a "$enable_libwebpmux" = "yes"; then
   build_img2webp=yes
+else
+  AC_MSG_NOTICE(
+    m4_normalize([Not building img2webp.
+                  --enable-libwebpdemux & --enable-libwebpmux are required.]))
 fi
 AM_CONDITIONAL([BUILD_IMG2WEBP], [test "${build_img2webp}" = "yes"])
 
 if test "$enable_libwebpmux" = "yes"; then
   build_webpinfo=yes
+else
+  AC_MSG_NOTICE([Not building webpinfo. --enable-libwebpdemux is required.])
 fi
 AM_CONDITIONAL([BUILD_WEBPINFO], [test "${build_webpinfo}" = "yes"])
 
@@ -676,19 +732,6 @@ fi
 AC_MSG_RESULT(${enable_swap_16bit_csp-no})
 AC_SUBST(USE_SWAP_16BIT_CSP)
 
-dnl === If --enable-experimental is defined, add -DWEBP_EXPERIMENTAL_FEATURES
-
-USE_EXPERIMENTAL_CODE=""
-AC_MSG_CHECKING(if --enable-experimental option is specified)
-AC_ARG_ENABLE([experimental], AS_HELP_STRING([--enable-experimental],
-                                             [Activate experimental features]))
-if test "$enable_experimental" = "yes"; then
-  AC_DEFINE(WEBP_EXPERIMENTAL_FEATURES, [1], [Enable experimental code])
-  USE_EXPERIMENTAL_CODE="-DWEBP_EXPERIMENTAL_FEATURES"
-fi
-AC_MSG_RESULT(${enable_experimental-no})
-AC_SUBST(USE_EXPERIMENTAL_CODE)
-
 dnl === If --disable-near-lossless is defined, add -DWEBP_NEAR_LOSSLESS=0
 
 AC_DEFINE(WEBP_NEAR_LOSSLESS, [1], [Enable near lossless encoding])
@@ -704,44 +747,15 @@ else
   AC_MSG_RESULT([no])
 fi
 
-dnl === Check whether libwebpmux should be built
-AC_MSG_CHECKING(whether libwebpmux is to be built)
-AC_ARG_ENABLE([libwebpmux],
-              AS_HELP_STRING([--enable-libwebpmux],
-                             [Build libwebpmux @<:@default=no@:>@]))
-AC_MSG_RESULT(${enable_libwebpmux-no})
-AM_CONDITIONAL([WANT_MUX], [test "$enable_libwebpmux" = "yes"])
-
-dnl === Check whether libwebpdemux should be built
-AC_MSG_CHECKING(whether libwebpdemux is to be built)
-AC_ARG_ENABLE([libwebpdemux],
-              AS_HELP_STRING([--enable-libwebpdemux],
-                             [Build libwebpdemux @<:@default=no@:>@]))
-AC_MSG_RESULT(${enable_libwebpdemux-no})
-AM_CONDITIONAL([WANT_DEMUX], [test "$enable_libwebpdemux" = "yes"])
-
-dnl === Check whether decoder library should be built.
-AC_MSG_CHECKING(whether decoder library is to be built)
-AC_ARG_ENABLE([libwebpdecoder],
-              AS_HELP_STRING([--enable-libwebpdecoder],
-                             [Build libwebpdecoder @<:@default=no@:>@]))
-AC_MSG_RESULT(${enable_libwebpdecoder-no})
-AM_CONDITIONAL([BUILD_LIBWEBPDECODER], [test "$enable_libwebpdecoder" = "yes"])
-
-dnl === Check whether libwebpextras should be built
-AC_MSG_CHECKING(whether libwebpextras is to be built)
-AC_ARG_ENABLE([libwebpextras],
-              AS_HELP_STRING([--enable-libwebpextras],
-                             [Build libwebpextras @<:@default=no@:>@]))
-AC_MSG_RESULT(${enable_libwebpextras-no})
-AM_CONDITIONAL([WANT_EXTRAS], [test "$enable_libwebpextras" = "yes"])
-
 dnl =========================
 
+dnl Add an empty webp_libname_prefix variable for use in *.pc.in.
+AC_SUBST([webp_libname_prefix])
 AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_HEADERS([src/webp/config.h])
 AC_CONFIG_FILES([Makefile src/Makefile man/Makefile \
                  examples/Makefile extras/Makefile imageio/Makefile \
+                 sharpyuv/Makefile sharpyuv/libsharpyuv.pc \
                  src/dec/Makefile src/enc/Makefile src/dsp/Makefile \
                  src/demux/Makefile src/mux/Makefile \
                  src/utils/Makefile \
@@ -765,14 +779,14 @@ libwebpmux: ${enable_libwebpmux-no}
 libwebpextras: ${enable_libwebpextras-no}
 
 Tools:
-cwebp : yes
+cwebp : ${enable_libwebpdemux-no}
   Input format support
   ====================
   JPEG : ${jpeg_support-no}
   PNG  : ${png_support-no}
   TIFF : ${tiff_support-no}
   WIC  : ${wic_support-no}
-dwebp : yes
+dwebp : ${enable_libwebpdemux-no}
   Output format support
   =====================
   PNG  : ${png_support-no}
