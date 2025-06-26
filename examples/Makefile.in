@@ -435,7 +435,7 @@ dwebp_LDADD = libexample_util.la ../imageio/libimagedec.la \
 	../imageio/libimageenc.la ../imageio/libimageio_util.la \
 	../src/libwebp.la $(PNG_LIBS) $(JPEG_LIBS)
 gif2webp_SOURCES = gif2webp.c gifdec.c gifdec.h
-gif2webp_CPPFLAGS = $(AM_CPPFLAGS) $(GIF_INCLUDES)
+gif2webp_CPPFLAGS = $(AM_CPPFLAGS) $(GIF_INCLUDES) -I$(top_srcdir)
 gif2webp_LDADD = libexample_util.la ../imageio/libimageio_util.la \
 	../src/mux/libwebpmux.la ../src/libwebp.la $(GIF_LIBS)
 vwebp_SOURCES = vwebp.c
