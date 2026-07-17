@@ -107,8 +107,9 @@ CONFIG_CLEAN_VPATH_FILES =
 LTLIBRARIES = $(noinst_LTLIBRARIES)
 libwebputils_la_LIBADD =
 am__objects_1 = bit_reader_utils.lo color_cache_utils.lo \
-	filters_utils.lo huffman_utils.lo quant_levels_dec_utils.lo \
-	rescaler_utils.lo random_utils.lo thread_utils.lo utils.lo
+	filters_utils.lo huffman_utils.lo palette.lo \
+	quant_levels_dec_utils.lo rescaler_utils.lo random_utils.lo \
+	thread_utils.lo utils.lo
 am__objects_2 = bit_writer_utils.lo huffman_encode_utils.lo \
 	quant_levels_utils.lo
 am_libwebputils_la_OBJECTS = $(am__objects_1) $(am__objects_2)
@@ -121,8 +122,8 @@ libwebputilsdecode_la_LIBADD =
 am__libwebputilsdecode_la_SOURCES_DIST = bit_reader_utils.c \
 	bit_reader_utils.h bit_reader_inl_utils.h color_cache_utils.c \
 	color_cache_utils.h endian_inl_utils.h filters_utils.c \
-	filters_utils.h huffman_utils.c huffman_utils.h \
-	quant_levels_dec_utils.c quant_levels_dec_utils.h \
+	filters_utils.h huffman_utils.c huffman_utils.h palette.c \
+	palette.h quant_levels_dec_utils.c quant_levels_dec_utils.h \
 	rescaler_utils.c rescaler_utils.h random_utils.c \
 	random_utils.h thread_utils.c thread_utils.h utils.c utils.h
 @BUILD_LIBWEBPDECODER_TRUE@am_libwebputilsdecode_la_OBJECTS =  \
@@ -149,7 +150,7 @@ am__depfiles_remade = ./$(DEPDIR)/bit_reader_utils.Plo \
 	./$(DEPDIR)/color_cache_utils.Plo \
 	./$(DEPDIR)/filters_utils.Plo \
 	./$(DEPDIR)/huffman_encode_utils.Plo \
-	./$(DEPDIR)/huffman_utils.Plo \
+	./$(DEPDIR)/huffman_utils.Plo ./$(DEPDIR)/palette.Plo \
 	./$(DEPDIR)/quant_levels_dec_utils.Plo \
 	./$(DEPDIR)/quant_levels_utils.Plo \
 	./$(DEPDIR)/random_utils.Plo ./$(DEPDIR)/rescaler_utils.Plo \
@@ -382,10 +383,10 @@ noinst_HEADERS = ../dsp/cpu.h ../dsp/dsp.h ../webp/decode.h \
 COMMON_SOURCES = bit_reader_utils.c bit_reader_utils.h \
 	bit_reader_inl_utils.h color_cache_utils.c color_cache_utils.h \
 	endian_inl_utils.h filters_utils.c filters_utils.h \
-	huffman_utils.c huffman_utils.h quant_levels_dec_utils.c \
-	quant_levels_dec_utils.h rescaler_utils.c rescaler_utils.h \
-	random_utils.c random_utils.h thread_utils.c thread_utils.h \
-	utils.c utils.h
+	huffman_utils.c huffman_utils.h palette.c palette.h \
+	quant_levels_dec_utils.c quant_levels_dec_utils.h \
+	rescaler_utils.c rescaler_utils.h random_utils.c \
+	random_utils.h thread_utils.c thread_utils.h utils.c utils.h
 ENC_SOURCES = bit_writer_utils.c bit_writer_utils.h \
 	huffman_encode_utils.c huffman_encode_utils.h \
 	quant_levels_utils.c quant_levels_utils.h
@@ -454,6 +455,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/filters_utils.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/huffman_encode_utils.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/huffman_utils.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/palette.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/quant_levels_dec_utils.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/quant_levels_utils.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/random_utils.Plo@am__quote@ # am--include-marker
@@ -651,6 +653,7 @@ distclean: distclean-am
 	-rm -f ./$(DEPDIR)/filters_utils.Plo
 	-rm -f ./$(DEPDIR)/huffman_encode_utils.Plo
 	-rm -f ./$(DEPDIR)/huffman_utils.Plo
+	-rm -f ./$(DEPDIR)/palette.Plo
 	-rm -f ./$(DEPDIR)/quant_levels_dec_utils.Plo
 	-rm -f ./$(DEPDIR)/quant_levels_utils.Plo
 	-rm -f ./$(DEPDIR)/random_utils.Plo
@@ -708,6 +711,7 @@ maintainer-clean: maintainer-clean-am
 	-rm -f ./$(DEPDIR)/filters_utils.Plo
 	-rm -f ./$(DEPDIR)/huffman_encode_utils.Plo
 	-rm -f ./$(DEPDIR)/huffman_utils.Plo
+	-rm -f ./$(DEPDIR)/palette.Plo
 	-rm -f ./$(DEPDIR)/quant_levels_dec_utils.Plo
 	-rm -f ./$(DEPDIR)/quant_levels_utils.Plo
 	-rm -f ./$(DEPDIR)/random_utils.Plo

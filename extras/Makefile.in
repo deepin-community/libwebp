@@ -114,7 +114,8 @@ PROGRAMS = $(noinst_PROGRAMS)
 LTLIBRARIES = $(noinst_LTLIBRARIES)
 libwebpextras_la_DEPENDENCIES = ../src/libwebp.la
 am_libwebpextras_la_OBJECTS = libwebpextras_la-extras.lo \
-	libwebpextras_la-quality_estimate.lo
+	libwebpextras_la-quality_estimate.lo \
+	libwebpextras_la-sharpyuv_risk_table.lo
 libwebpextras_la_OBJECTS = $(am_libwebpextras_la_OBJECTS)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
@@ -158,6 +159,7 @@ am__maybe_remake_depfiles = depfiles
 am__depfiles_remade = ./$(DEPDIR)/get_disto-get_disto.Po \
 	./$(DEPDIR)/libwebpextras_la-extras.Plo \
 	./$(DEPDIR)/libwebpextras_la-quality_estimate.Plo \
+	./$(DEPDIR)/libwebpextras_la-sharpyuv_risk_table.Plo \
 	./$(DEPDIR)/vwebp_sdl-vwebp_sdl.Po \
 	./$(DEPDIR)/vwebp_sdl-webp_to_sdl.Po \
 	./$(DEPDIR)/webp_quality-webp_quality.Po
@@ -357,7 +359,8 @@ top_srcdir = @top_srcdir@
 webp_libname_prefix = @webp_libname_prefix@
 noinst_LTLIBRARIES = libwebpextras.la
 noinst_HEADERS = ../src/webp/types.h
-libwebpextras_la_SOURCES = extras.c extras.h quality_estimate.c
+libwebpextras_la_SOURCES = extras.c extras.h quality_estimate.c \
+	sharpyuv_risk_table.c sharpyuv_risk_table.h
 libwebpextras_la_CPPFLAGS = $(AM_CPPFLAGS)
 libwebpextras_la_LDFLAGS = -lm
 libwebpextras_la_LIBADD = ../src/libwebp.la
@@ -452,6 +455,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/get_disto-get_disto.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libwebpextras_la-extras.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libwebpextras_la-quality_estimate.Plo@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libwebpextras_la-sharpyuv_risk_table.Plo@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/vwebp_sdl-vwebp_sdl.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/vwebp_sdl-webp_to_sdl.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/webp_quality-webp_quality.Po@am__quote@ # am--include-marker
@@ -499,6 +503,13 @@ libwebpextras_la-quality_estimate.lo: quality_estimate.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='quality_estimate.c' object='libwebpextras_la-quality_estimate.lo' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libwebpextras_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libwebpextras_la-quality_estimate.lo `test -f 'quality_estimate.c' || echo '$(srcdir)/'`quality_estimate.c
+
+libwebpextras_la-sharpyuv_risk_table.lo: sharpyuv_risk_table.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libwebpextras_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT libwebpextras_la-sharpyuv_risk_table.lo -MD -MP -MF $(DEPDIR)/libwebpextras_la-sharpyuv_risk_table.Tpo -c -o libwebpextras_la-sharpyuv_risk_table.lo `test -f 'sharpyuv_risk_table.c' || echo '$(srcdir)/'`sharpyuv_risk_table.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libwebpextras_la-sharpyuv_risk_table.Tpo $(DEPDIR)/libwebpextras_la-sharpyuv_risk_table.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='sharpyuv_risk_table.c' object='libwebpextras_la-sharpyuv_risk_table.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(libwebpextras_la_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o libwebpextras_la-sharpyuv_risk_table.lo `test -f 'sharpyuv_risk_table.c' || echo '$(srcdir)/'`sharpyuv_risk_table.c
 
 get_disto-get_disto.o: get_disto.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(get_disto_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT get_disto-get_disto.o -MD -MP -MF $(DEPDIR)/get_disto-get_disto.Tpo -c -o get_disto-get_disto.o `test -f 'get_disto.c' || echo '$(srcdir)/'`get_disto.c
@@ -689,6 +700,7 @@ distclean: distclean-am
 		-rm -f ./$(DEPDIR)/get_disto-get_disto.Po
 	-rm -f ./$(DEPDIR)/libwebpextras_la-extras.Plo
 	-rm -f ./$(DEPDIR)/libwebpextras_la-quality_estimate.Plo
+	-rm -f ./$(DEPDIR)/libwebpextras_la-sharpyuv_risk_table.Plo
 	-rm -f ./$(DEPDIR)/vwebp_sdl-vwebp_sdl.Po
 	-rm -f ./$(DEPDIR)/vwebp_sdl-webp_to_sdl.Po
 	-rm -f ./$(DEPDIR)/webp_quality-webp_quality.Po
@@ -740,6 +752,7 @@ maintainer-clean: maintainer-clean-am
 		-rm -f ./$(DEPDIR)/get_disto-get_disto.Po
 	-rm -f ./$(DEPDIR)/libwebpextras_la-extras.Plo
 	-rm -f ./$(DEPDIR)/libwebpextras_la-quality_estimate.Plo
+	-rm -f ./$(DEPDIR)/libwebpextras_la-sharpyuv_risk_table.Plo
 	-rm -f ./$(DEPDIR)/vwebp_sdl-vwebp_sdl.Po
 	-rm -f ./$(DEPDIR)/vwebp_sdl-webp_to_sdl.Po
 	-rm -f ./$(DEPDIR)/webp_quality-webp_quality.Po
